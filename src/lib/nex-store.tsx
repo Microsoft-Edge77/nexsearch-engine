@@ -120,5 +120,17 @@ export function useNex() {
 }
 
 export function imgCdn(src: string, w: number) {
+  if (!src) return ''
+  if (src.startsWith('data:')) return src
+
+  try {
+    const u = new URL(src)
+    const allowed = ['images.unsplash.com', 'images.pexels.com', 'images.ctfassets.net']
+    if (allowed.includes(u.hostname)) return src
+    if (u.hostname.endsWith('bing.net')) return src
+  } catch {
+    return src
+  }
+
   return `/.netlify/images?url=${encodeURIComponent(src)}&w=${w}&fm=webp`
 }

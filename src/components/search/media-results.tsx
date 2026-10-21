@@ -1,172 +1,221 @@
-import { useMemo, useState } from 'react'
-import { Play, Star } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ExternalLink } from 'lucide-react'
 
-import {
-  getNewsResults,
-  getShoppingResults,
-  getVideoResults,
-  type NewsResult,
-} from '@/lib/fixtures'
-import { imgCdn } from '@/lib/nex-store'
-import { cn } from '@/lib/utils'
+import { useLiveToggle } from '@/components/nex/live-tile'
+import { Calculator } from '@/components/tools/calculator'
+import { Timer } from '@/components/tools/timer'
+import { Translator } from '@/components/tools/translator'
+import { detectTool, parseDuration } from '@/lib/instant-answers'
+import { useNex } from '@/lib/nex-store'
+import { AiOverview } from './ai-overview'
+import { WikiPanel } from './wiki-panel'
 
-const delay = (ms: number) => ({ '--nx-delay': `${ms}ms` }) as React.CSSProperties
+type LiveWebResult = {
+  title: string
+  url: string
+  displayUrl: string
+  domain: string
+  snippet: string
+  engines: string[]
+  score: number
+  color: string
+  tile?: boolean
+}
 
-export function VideoResults({ q }: { q: string }) {
-  const videos = useMemo(() => getVideoResults(q), [q])
+function host(url: string) {
+  return new URL(url).hostname.replace(/^www\./, '')
+}
+
+function Favicon({ url, color }: { url: string; color: string }) {
+  const [failed, setFailed] = useState(false)
+  const h = host(url)
+  return failed ? (
+    <span className="grid size-7 shrink-0 place-items-center text-xs uppercase" style={{ backgroundColor: color }}>
+      {h[0]}
+    </span>
+  ) : (
+    <span className="grid size-7 shrink-0 place-items-center bg-white">
+      <img
+        src={`https://icons.duckduckgo.com/ip3/${h}.ico`}
+        alt=""
+        className="size-4"
+        onError={() => setFailed(true)}
+      />
+    </span>
+  )
+}
+
+function EngineBadges({ r }: { r: LiveWebResult }) {
   return (
-    <div className="grid gap-x-3 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      {videos.map((v, i) => (
-        <a
-          key={v.id}
-          href={v.url}
-          target="_blank"
-          rel="noreferrer"
-          className="nx-turnstile group block"
-          style={delay(i * 45)}
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[0.7rem]">
+      {r.engines.map((e) => (
+        <span
+          key={e}
+          className={e === 'Bing' ? 'bg-[#008373] px-1.5 py-0.5' : 'bg-[#de5833] px-1.5 py-0.5'}
         >
-          <div className="nx-tile aspect-video bg-white/5">
-            <img src={imgCdn(v.thumb, 480)} alt="" loading="lazy" className="size-full object-cover" />
-            <span className="absolute inset-0 grid place-items-center bg-black/20 opacity-0 transition-opacity group-hover:opacity-100">
-              <span className="grid size-14 place-items-center bg-primary">
-                <Play className="size-7 fill-white" />
-              </span>
-            </span>
-            <span className="absolute right-1.5 bottom-1.5 bg-black/80 px-1.5 py-0.5 text-xs">{v.duration}</span>
-          </div>
-          <h3 className="mt-2 line-clamp-2 leading-snug group-hover:underline">{v.title}</h3>
-          <p className="text-xs text-muted-foreground">
-            {v.channel} · {v.views} vues · {v.platform} · via {v.engine}
-          </p>
-        </a>
+          {e}
+        </span>
       ))}
+      <span className="text-muted-foreground">Pertinence IA {r.score}</span>
     </div>
   )
 }
 
-const FEEDS = ['Tout', 'Google News', 'MSN'] as const
+function ResultRow({ r, delay }: { r: LiveWebResult; delay: number }) {
+  return (
+    <article className="nx-slide-in py-4" style={{ '--nx-delay': `${delay}ms` } as React.CSSProperties}>
+      <div className="mb-1 flex items-center gap-2.5">
+        <Favicon url={r.url} color={r.color} />
+        <div className="min-w-0 text-sm leading-tight">
+          <div className="truncate">{host(r.url)}</div>
+          <div className="truncate text-xs text-muted-foreground">{r.displayUrl}</div>
+        </div>
+      </div>
+      <a
+        href={r.url}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xl text-primary brightness-[1.6] saturate-[.8] hover:underline"
+      >
+        {r.title}
+      </a>
+      <p className="mt-1 text-sm leading-relaxed text-white/80">{r.snippet}</p>
+      <EngineBadges r={r} />
+    </article>
+  )
+}
 
-export function NewsResults({ q }: { q: string }) {
-  const all = useMemo(() => getNewsResults(q), [q])
-  const [feed, setFeed] = useState<(typeof FEEDS)[number]>('Tout')
-  const news = feed === 'Tout' ? all : all.filter((n) => n.feed === feed)
-  const [hero, ...rest] = news
+function ResultTile({ r, delay }: { r: LiveWebResult; delay: number }) {
+  const flipped = useLiveToggle(true, 4500)
+  const [shotFailed, setShotFailed] = useState(false)
 
   return (
-    <div className="max-w-5xl">
-      <div className="mb-5 flex gap-1" role="group" aria-label="Source des actualités">
-        {FEEDS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            aria-pressed={feed === f}
-            onClick={() => setFeed(f)}
-            className={cn('px-3 py-1.5 text-sm', feed === f ? 'bg-primary' : 'bg-white/10 hover:bg-white/20')}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      {hero && <NewsHero n={hero} key={`${feed}-hero`} />}
-      <div key={feed} className="mt-3 grid gap-3 md:grid-cols-2">
-        {rest.map((n, i) => (
-          <a
-            key={n.id}
-            href={n.url}
-            target="_blank"
-            rel="noreferrer"
-            className="nx-slide-in flex gap-3 bg-white/[0.06] p-3 transition-colors hover:bg-white/[0.12]"
-            style={delay(i * 50)}
-          >
-            {n.image && (
-              <img src={imgCdn(n.image, 240)} alt="" loading="lazy" className="size-20 shrink-0 object-cover" />
-            )}
-            <div className="min-w-0">
-              <NewsMeta n={n} />
-              <h3 className="leading-snug">{n.title}</h3>
+    <div className="nx-turnstile py-3" style={{ '--nx-delay': `${delay}ms` } as React.CSSProperties}>
+      <a
+        href={r.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={r.title}
+        className="nx-tile block h-44 sm:h-48"
+        style={{ backgroundColor: r.color }}
+      >
+        <div className="nx-flip" data-flipped={flipped}>
+          <div className="nx-face flex flex-col justify-between p-4" style={{ backgroundColor: r.color }}>
+            <div className="flex items-center gap-2 text-sm">
+              <Favicon url={r.url} color="rgba(0,0,0,.3)" />
+              {host(r.url)}
             </div>
-          </a>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function NewsMeta({ n }: { n: NewsResult }) {
-  return (
-    <p className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-      <span className={cn('px-1.5 py-0.5 text-white', n.feed === 'MSN' ? 'bg-[#0078d4]' : 'bg-[#4285f4]')}>
-        {n.feed}
-      </span>
-      {n.outlet} · {n.ago}
-    </p>
-  )
-}
-
-function NewsHero({ n }: { n: NewsResult }) {
-  return (
-    <a
-      href={n.url}
-      target="_blank"
-      rel="noreferrer"
-      className="nx-tile nx-turnstile block h-64 bg-primary sm:h-80"
-    >
-      {n.image && (
-        <img src={imgCdn(n.image, 1100)} alt="" className="absolute inset-0 size-full object-cover" />
-      )}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5 pt-20">
-        <NewsMeta n={n} />
-        <h3 className="metro-light text-2xl leading-tight sm:text-4xl">{n.title}</h3>
-        <p className="mt-1 line-clamp-2 text-sm text-white/85">{n.summary}</p>
-      </div>
-    </a>
-  )
-}
-
-export function ShoppingResults({ q }: { q: string }) {
-  const items = useMemo(() => getShoppingResults(q), [q])
-  return (
-    <div>
-      <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
-        Offres proposées par <span className="bg-[#232f3e] px-2 py-0.5 font-semibold text-[#ff9900]">amazon.fr</span>
-      </p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-        {items.map((p, i) => (
-          <a
-            key={p.id}
-            href={p.url}
-            target="_blank"
-            rel="noreferrer"
-            className="nx-turnstile group flex flex-col bg-white text-black"
-            style={delay(i * 40)}
-          >
-            <div className="aspect-square overflow-hidden">
+            <div>
+              <h3 className="metro-light text-2xl leading-tight sm:text-3xl">{r.title}</h3>
+              <p className="mt-1 line-clamp-1 text-sm text-white/85">{r.snippet}</p>
+            </div>
+          </div>
+          <div className="nx-face nx-face-back bg-[#111]">
+            {!shotFailed && (
               <img
-                src={imgCdn(p.image, 400)}
+                src={`https://s0.wp.com/mshots/v1/${encodeURIComponent(r.url)}?w=800&h=500`}
                 alt=""
                 loading="lazy"
-                className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
+                onError={() => setShotFailed(true)}
+                className="absolute inset-0 size-full object-cover object-top opacity-90"
               />
+            )}
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/90 to-transparent px-4 pt-10 pb-3 text-sm">
+              <span>Aperçu du site · {host(r.url)}</span>
+              <ExternalLink className="size-4" />
             </div>
-            <div className="flex flex-1 flex-col p-3">
-              <h3 className="line-clamp-2 text-sm leading-snug group-hover:underline">{p.title}</h3>
-              <div className="mt-1 flex items-center gap-1 text-xs" aria-label={`Note ${p.rating} sur 5`}>
-                {Array.from({ length: 5 }, (_, s) => (
-                  <Star
-                    key={s}
-                    className={cn('size-3.5', s < Math.round(p.rating) ? 'fill-[#ff9900] text-[#ff9900]' : 'text-neutral-300')}
-                  />
-                ))}
-                <span className="text-neutral-500">({p.reviews.toLocaleString('fr-FR')})</span>
-              </div>
-              <div className="mt-auto pt-2">
-                <span className="text-lg font-semibold">{p.price}</span>
-                {p.oldPrice && <span className="ml-2 text-xs text-neutral-500 line-through">{p.oldPrice}</span>}
-                {p.prime && <span className="ml-2 text-xs font-bold text-[#00a8e1]">prime</span>}
-              </div>
-            </div>
-          </a>
-        ))}
+          </div>
+        </div>
+      </a>
+      <EngineBadges r={r} />
+    </div>
+  )
+}
+
+export function WebResults({ q }: { q: string }) {
+  const { settings, hydrated } = useNex()
+  const [results, setResults] = useState<LiveWebResult[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const tool = detectTool(q)
+
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&type=web`)
+        if (!res.ok) throw new Error('search failed')
+        const data = await res.json()
+
+        const mapped = ((data.results ?? []) as any[]).map((r: any, i: number) => ({
+          title: r.title,
+          url: r.url,
+          displayUrl: r.displayUrl ?? r.domain ?? host(r.url),
+          domain: r.domain ?? host(r.url),
+          snippet: r.snippet ?? '',
+          engines: r.engines && r.engines.length ? r.engines : [data.source === 'duckduckgo' ? 'DuckDuckGo' : data.source === 'wikipedia' ? 'Wikipedia' : 'Bing'],
+          score: typeof r.score === 'number' ? r.score : 95 - i,
+          color: i % 4 === 2 ? '#2d89ef' : '#161616',
+          tile: i % 4 === 2,
+        }))
+
+        if (!cancelled) setResults(mapped)
+      } catch {
+        if (!cancelled) {
+          setResults([])
+          setError('Impossible de charger les résultats web.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [q])
+
+  const overview = useMemo(() => {
+    const sources = results.slice(0, 4).map((r) => ({ title: r.title, url: r.url }))
+    return {
+      paragraphs: [
+        `D’après les sources les mieux classées pour « ${q} », les résultats affichés proviennent directement des moteurs de recherche et des sources web disponibles.`,
+      ],
+      bullets: [
+        `Le classement est calculé à partir des termes de la requête « ${q} ».`,
+        'Les liens sont dédupliqués et triés par pertinence.',
+        'Le panneau de contexte Wikipédia reste affiché quand la requête correspond à une page utile.',
+      ],
+      sources,
+    }
+  }, [q, results])
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,44rem)_minmax(18rem,24rem)] lg:gap-x-12">
+      <div className="space-y-5 lg:col-start-1">
+        {tool === 'calculator' && <Calculator key={q} initial={q} />}
+        {tool === 'timer' && <Timer key={q} initialSeconds={parseDuration(q) ?? 300} />}
+        {tool === 'translator' && <Translator />}
+        {hydrated && settings.aiOverview && <AiOverview data={overview} />}
+      </div>
+
+      <aside className="lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <div className="lg:sticky lg:top-32">
+          <WikiPanel q={q} />
+        </div>
+      </aside>
+
+      <div className="divide-y divide-white/10 lg:col-start-1">
+        {loading && <div className="py-6 text-sm text-muted-foreground">Chargement des résultats…</div>}
+        {!loading && error && <div className="py-6 text-sm text-red-400">{error}</div>}
+        {!loading && !error && results.length === 0 && (
+          <div className="py-6 text-sm text-muted-foreground">Aucun résultat trouvé pour cette recherche.</div>
+        )}
+        {!loading && !error && results.map((r, i) => (r.tile ? <ResultTile key={`${r.url}-${i}`} r={r} delay={i * 50} /> : <ResultRow key={`${r.url}-${i}`} r={r} delay={i * 50} />))}
       </div>
     </div>
   )
