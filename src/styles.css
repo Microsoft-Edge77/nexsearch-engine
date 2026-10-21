@@ -1,0 +1,307 @@
+@import 'tailwindcss' source('../');
+
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+body {
+  @apply m-0;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+:root {
+  --font-body:
+    'Segoe UI', 'Segoe UI Web (West European)', -apple-system,
+    BlinkMacSystemFont, 'Helvetica Neue', 'Noto Sans', sans-serif;
+  --font-heading:
+    'Segoe UI Light', 'Segoe UI', -apple-system,
+    BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  /* Accent colour, overwritten at runtime from the settings flyout */
+  --nx-accent: #2d89ef;
+  --nx-bg: #1d1d1d;
+  --nx-surface: #262626;
+  --nx-cell: 5.5rem;
+  --nx-gap: 0.5rem;
+  --content-width: 72rem;
+  --reading-width: 42rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.871 0.006 286.286);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.21 0.006 285.885);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.871 0.006 286.286);
+}
+
+.dark {
+  --background: var(--nx-bg);
+  --foreground: #ffffff;
+  --card: var(--nx-surface);
+  --card-foreground: #ffffff;
+  --popover: #1f1f1f;
+  --popover-foreground: #ffffff;
+  --primary: var(--nx-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #333333;
+  --secondary-foreground: #ffffff;
+  --muted: #2b2b2b;
+  --muted-foreground: #a6a6a6;
+  --accent: #333333;
+  --accent-foreground: #ffffff;
+  --destructive: #e51400;
+  --destructive-foreground: #ffffff;
+  --border: #3a3a3a;
+  --input: #3a3a3a;
+  --ring: var(--nx-accent);
+  --radius: 0rem;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --font-display: var(--font-heading);
+  --container-content: var(--content-width);
+  --container-reading: var(--reading-width);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: max(0px, calc(var(--radius) - 4px));
+  --radius-md: max(0px, calc(var(--radius) - 2px));
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ---------- Metro typography ---------- */
+.metro-light {
+  font-family: var(--font-heading);
+  font-weight: 300;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- Turnstile entrance ---------- */
+@keyframes nx-turnstile-in {
+  from {
+    opacity: 0;
+    transform: perspective(1200px) rotateY(-75deg) translateX(-40px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(0) translateX(0);
+  }
+}
+.nx-turnstile {
+  transform-origin: left center;
+  animation: nx-turnstile-in 0.55s cubic-bezier(0.1, 0.9, 0.2, 1) backwards;
+  animation-delay: var(--nx-delay, 0ms);
+}
+
+@keyframes nx-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.nx-slide-in {
+  animation: nx-slide-in 0.45s cubic-bezier(0.1, 0.9, 0.2, 1) backwards;
+  animation-delay: var(--nx-delay, 0ms);
+}
+
+@keyframes nx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.nx-rise {
+  animation: nx-rise 0.5s cubic-bezier(0.1, 0.9, 0.2, 1) backwards;
+  animation-delay: var(--nx-delay, 0ms);
+}
+
+/* ---------- Live tiles ---------- */
+.nx-tile {
+  position: relative;
+  overflow: hidden;
+  perspective: 900px;
+  color: #fff;
+  transition: transform 0.12s ease-out;
+  outline-offset: 2px;
+}
+.nx-tile:hover {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+}
+.nx-tile:active {
+  transform: scale(0.97);
+}
+.nx-flip {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nx-flip[data-flipped='true'] {
+  transform: rotateX(180deg);
+}
+.nx-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.nx-face-back {
+  transform: rotateX(180deg);
+}
+.nx-peek {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nx-peek[data-peek='true'] {
+  transform: translateY(-100%);
+}
+
+/* Start-screen tile grid */
+.nx-group {
+  display: grid;
+  grid-template-columns: repeat(var(--nx-cols-md, var(--nx-cols, 6)), var(--nx-cell));
+  grid-auto-rows: var(--nx-cell);
+  grid-auto-flow: dense;
+  gap: var(--nx-gap);
+}
+.nx-s {
+  grid-column: span 1;
+  grid-row: span 1;
+}
+.nx-m {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.nx-w {
+  grid-column: span 4;
+  grid-row: span 2;
+}
+.nx-l {
+  grid-column: span 4;
+  grid-row: span 4;
+}
+@media (max-width: 767px) {
+  .nx-group {
+    --nx-cell: calc((100vw - 2rem - 3 * var(--nx-gap)) / 4);
+    grid-template-columns: repeat(4, var(--nx-cell));
+  }
+}
+
+.nx-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-turnstile,
+  .nx-slide-in,
+  .nx-rise {
+    animation: none;
+  }
+  .nx-flip,
+  .nx-peek {
+    transition: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* Size cells so every Start group fits the viewport height (6 rows max) */
+  .nx-group {
+    grid-template-columns: repeat(var(--nx-cols, 6), var(--nx-cell));
+  }
+  .nx-start .nx-group {
+    --nx-cell: clamp(4.25rem, calc((100vh - 17rem) / 6 - 0.5rem), 7.5rem);
+  }
+}
+
+@keyframes nx-slide-in-rev {
+  from {
+    opacity: 0;
+    transform: translateX(-60px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
