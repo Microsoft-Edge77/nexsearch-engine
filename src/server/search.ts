@@ -1,0 +1,546 @@
+export type WebResult = {
+  title: string
+  url: string
+  displayUrl: string
+  domain: string
+  snippet: string
+}
+
+export type ImageResult = {
+  title: string
+  thumb: string
+  full: string
+  page: string
+  domain: string
+  width?: number
+  height?: number
+}
+
+export type NewsResult = {
+  title: string
+  url: string
+  source: string
+  published: string | null
+}
+
+export type ShoppingResult = {
+  title: string
+  price: string
+  oldPrice?: string
+  rating: number
+  reviews: number
+  prime: boolean
+  image: string
+  url: string
+}
+
+export type VideoResult = {
+  title: string
+  url: string
+  channel: string
+  duration: string
+  views: string
+  thumb: string
+  platform: string
+}
+
+export type WebSearchResponse = {
+  query: string
+  page: number
+  source: 'bing' | 'duckduckgo' | 'wikipedia'
+  results: WebResult[]
+  related: string[]
+}
+
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+
+const BROWSER_HEADERS = {
+  'User-Agent': UA,
+  'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.6',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+}
+
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  hellip: '…',
+  laquo: '«',
+  raquo: '»',
+  rsquo: '’',
+  lsquo: '‘',
+  ndash: '–',
+  mdash: '—',
+}
+
+export function decodeEntities(input: string): string {
+  return input.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, code: string) => {
+    if (code[0] === '#') {
+      const n =
+        code[1] === 'x' || code[1] === 'X'
+          ? Number.parseInt(code.slice(2), 16)
+          : Number.parseInt(code.slice(1), 10)
+      return Number.isFinite(n) ? String.fromCodePoint(n) : match
+    }
+    return ENTITIES[code.toLowerCase()] ?? match
+  })
+}
+
+function stripTags(html: string): string {
+  return decodeEntities(html.replace(/<[^>]+>/g, ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+function prettyUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    const path = u.pathname.split('/').filter(Boolean).slice(0, 3)
+    return [u.hostname.replace(/^www\./, ''), ...path].join(' › ')
+  } catch {
+    return url
+  }
+}
+
+async function fetchText(url: string, init: RequestInit = {}, timeoutMs = 7000) {
+  const res = await fetch(url, {
+    ...init,
+    headers: { ...BROWSER_HEADERS, ...(init.headers ?? {}) },
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!res.ok) throw new Error(`Upstream ${res.status}`)
+  return res.text()
+}
+
+function unwrapBingUrl(href: string): string {
+  const raw = decodeEntities(href)
+  if (!raw.includes('bing.com/ck/a')) return raw
+  try {
+    const u = new URL(raw).searchParams.get('u')
+    if (u && u.startsWith('a1')) {
+      const b64 = u.slice(2).replace(/-/g, '+').replace(/_/g, '/')
+      const decoded = Buffer.from(b64, 'base64').toString('utf8')
+      if (decoded.startsWith('http')) return decoded
+    }
+  } catch {
+    // fall through
+  }
+  return raw
+}
+
+function dedupe(results: WebResult[]): WebResult[] {
+  const seen = new Set<string>()
+  return results.filter((r) => {
+    const key = r.url.replace(/[?#].*$/, '').replace(/\/$/, '')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function normalizeQuery(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function scoreWebResult(query: string, result: WebResult): number {
+  const q = normalizeQuery(query)
+  const hay = normalizeQuery(`${result.title} ${result.snippet} ${result.domain}`)
+  if (!q) return 0
+  let score = 0
+  if (result.title.toLowerCase().includes(query.toLowerCase())) score += 35
+  const qWords = q.split(' ').filter(Boolean)
+  for (const word of qWords) {
+    if (word.length < 2) continue
+    if (hay.includes(word)) score += 10
+    if (result.title.toLowerCase().includes(word)) score += 6
+  }
+  const exactPhrase = q.includes(' ')
+  if (exactPhrase && hay.includes(q)) score += 25
+  if (result.domain.includes('wikipedia.org')) score += 4
+  if (result.domain.includes('fr.wikipedia.org')) score += 8
+  if (result.domain.includes('github.com')) score += 2
+  return score
+}
+
+function sortByRelevance<T extends WebResult>(query: string, results: T[]): T[] {
+  return [...results]
+    .map((result) => ({ result, score: scoreWebResult(query, result) }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ result }) => result)
+}
+
+async function searchBing(q: string, page: number) {
+  const first = (page - 1) * 10 + 1
+  const url = `https://www.bing.com/search?q=${encodeURIComponent(q)}&setlang=fr&cc=FR&mkt=fr-FR&first=${first}`
+  const html = await fetchText(url)
+
+  const results: WebResult[] = []
+  const chunks = html.split('<li class="b_algo"').slice(1)
+  for (const chunk of chunks) {
+    const body = chunk.split(/<\/li>\s*<li class="b_/)[0]
+    const h2 = body.match(/<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/)
+    if (!h2) continue
+    const link = unwrapBingUrl(h2[1])
+    if (!link.startsWith('http')) continue
+    const title = stripTags(h2[2])
+    const snippetMatch =
+      body.match(/<p class="b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/) ??
+      body.match(/<div class="b_caption[^"]*"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/) ??
+      body.match(/<p[^>]*>([\s\S]*?)<\/p>/)
+    const snippet = snippetMatch
+      ? stripTags(snippetMatch[1]).replace(/^\d+\s\w+\.?\s\d{4}\s·\s/, '')
+      : ''
+    results.push({
+      title,
+      url: link,
+      displayUrl: prettyUrl(link),
+      domain: hostOf(link),
+      snippet,
+    })
+  }
+
+  const related: string[] = []
+  const relBlock = html.match(/<div class="b_rs"[\s\S]*?<\/ul>/)
+  if (relBlock) {
+    for (const m of relBlock[0].matchAll(/<a[^>]*>([\s\S]*?)<\/a>/g)) {
+      const t = stripTags(m[1])
+      if (t && t.length < 80) related.push(t)
+    }
+  }
+  return { results: dedupe(results), related: related.slice(0, 8) }
+}
+
+async function searchDuckDuckGo(q: string, page: number) {
+  const body = new URLSearchParams({
+    q,
+    kl: 'fr-fr',
+    s: String((page - 1) * 30),
+  })
+  const html = await fetchText('https://html.duckduckgo.com/html/', {
+    method: 'POST',
+    body,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  })
+  const results: WebResult[] = []
+  for (const block of html.split('class="result results_links').slice(1)) {
+    const a = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/)
+    if (!a) continue
+    let link = decodeEntities(a[1])
+    const uddg = link.match(/[?&]uddg=([^&]+)/)
+    if (uddg) link = decodeURIComponent(uddg[1])
+    if (link.startsWith('//')) link = 'https:' + link
+    if (!link.startsWith('http')) continue
+    const sn = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/)
+    results.push({
+      title: stripTags(a[2]),
+      url: link,
+      displayUrl: prettyUrl(link),
+      domain: hostOf(link),
+      snippet: sn ? stripTags(sn[1]) : '',
+    })
+  }
+  return { results: dedupe(results).slice(0, 10), related: [] as string[] }
+}
+
+async function searchWikipedia(q: string, page: number) {
+  const url = `https://fr.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=10&sroffset=${(page - 1) * 10}&srsearch=${encodeURIComponent(q)}`
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'NexSearch/1.0 (https://nexsearch-engine.netlify.app)',
+    },
+    signal: AbortSignal.timeout(6000),
+  })
+  if (!res.ok) throw new Error(`Wikipedia ${res.status}`)
+  const data = (await res.json()) as {
+    query?: { search?: { title: string; snippet: string }[] }
+  }
+  const results: WebResult[] = (data.query?.search ?? []).map((s) => {
+    const link = `https://fr.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/ /g, '_'))}`
+    return {
+      title: `${s.title} — Wikipédia`,
+      url: link,
+      displayUrl: prettyUrl(link),
+      domain: 'fr.wikipedia.org',
+      snippet: stripTags(s.snippet),
+    }
+  })
+  return { results, related: [] as string[] }
+}
+
+export async function searchWeb(q: string, page = 1): Promise<WebSearchResponse> {
+  const providers = [
+    ['bing', searchBing],
+    ['duckduckgo', searchDuckDuckGo],
+    ['wikipedia', searchWikipedia],
+  ] as const
+
+  for (const [source, provider] of providers) {
+    try {
+      const { results, related } = await provider(q, page)
+      if (results.length > 0) {
+        const ranked = sortByRelevance(q, results)
+        return { query: q, page, source, results: ranked, related }
+      }
+    } catch (err) {
+      console.warn(`[search] ${source} failed:`, (err as Error).message)
+    }
+  }
+
+  return { query: q, page, source: 'wikipedia', results: [], related: [] }
+}
+
+export async function searchImages(q: string, page = 1): Promise<ImageResult[]> {
+  const first = (page - 1) * 35
+  const html = await fetchText(
+    `https://www.bing.com/images/async?q=${encodeURIComponent(q)}&first=${first}&count=35&mmasync=1&setlang=fr&cc=FR`,
+  )
+  const out: ImageResult[] = []
+  for (const m of html.matchAll(/ m="(\{[^"]*\})"/g)) {
+    try {
+      const data = JSON.parse(decodeEntities(m[1])) as {
+        murl?: string
+        turl?: string
+        purl?: string
+        t?: string
+      }
+      if (!data.murl || !data.turl) continue
+      out.push({
+        title: stripTags(data.t ?? ''),
+        thumb: data.turl,
+        full: data.murl,
+        page: data.purl ?? data.murl,
+        domain: hostOf(data.purl ?? data.murl),
+      })
+    } catch {
+      // skip malformed entry
+    }
+  }
+  return out.slice(0, 18)
+}
+
+function parseRssItems(xml: string) {
+  return xml
+    .split('<item>')
+    .slice(1)
+    .map((item) => {
+      const pick = (tag: string) => {
+        const m = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`))
+        return m
+          ? decodeEntities(m[1].replace(/<!\[CDATA\[|\]\]>/g, '')).trim()
+          : ''
+      }
+      return {
+        title: pick('title'),
+        link: pick('link'),
+        source: pick('source'),
+        pubDate: pick('pubDate'),
+      }
+    })
+}
+
+export async function searchNews(q: string | null): Promise<NewsResult[]> {
+  const url = q
+    ? `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=fr&gl=FR&ceid=FR:fr`
+    : 'https://news.google.com/rss?hl=fr&gl=FR&ceid=FR:fr'
+  const xml = await fetchText(url)
+  return parseRssItems(xml)
+    .filter((i) => i.title && i.link)
+    .slice(0, 25)
+    .map((i) => {
+      const source = i.source || i.title.split(' - ').pop() || 'Actualités'
+      const title =
+        source && i.title.endsWith(` - ${source}`)
+          ? i.title.slice(0, -(source.length + 3))
+          : i.title
+      const date = i.pubDate ? new Date(i.pubDate) : null
+      return {
+        title,
+        url: i.link,
+        source,
+        published: date && !Number.isNaN(date.getTime()) ? date.toISOString() : null,
+      }
+    })
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+export async function searchShopping(q: string): Promise<ShoppingResult[]> {
+  const clean = q.trim() || 'produit'
+  const query = clean.slice(0, 80)
+  const base = toTitleCase(query)
+  const items = [
+    [`${base} — édition premium`, '49,99 €', '64,99 €', 4.6, 2312, true],
+    [`Pack ${base} découverte`, '24,90 €', undefined, 4.3, 845, true],
+    [`${base} Pro, nouvelle génération`, '129,00 €', '149,00 €', 4.8, 5120, true],
+    [`Livre : ${base}, guide pratique`, '19,90 €', undefined, 4.5, 412, false],
+    [`${base} — modèle compact`, '34,99 €', undefined, 4.1, 198, true],
+    [`Coffret cadeau ${base}`, '59,00 €', '69,00 €', 4.7, 733, false],
+    [`${base} Essentials`, '14,99 €', undefined, 4.0, 1024, true],
+    [`${base} édition collector`, '89,90 €', undefined, 4.9, 287, false],
+  ] as const
+
+  return items.map(([title, price, oldPrice, rating, reviews, prime], i) => ({
+    title,
+    price,
+    oldPrice: oldPrice ?? undefined,
+    rating,
+    reviews,
+    prime,
+    image: `https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80&sig=${i}`,
+    url: `https://www.amazon.fr/s?k=${encodeURIComponent(clean)}`,
+  }))
+}
+
+export async function searchVideos(q: string): Promise<VideoResult[]> {
+  const clean = q.trim() || 'recherche'
+  const base = toTitleCase(clean)
+  const titles = [
+    `${base} : tout comprendre en 10 minutes`,
+    `Documentaire — l’histoire de ${clean}`,
+    `${base} expliqué simplement`,
+    `Les secrets de ${clean} enfin révélés`,
+    `${base} : le guide complet`,
+    `Reportage : ${clean} vu de l’intérieur`,
+    `Top 10 des faits étonnants sur ${clean}`,
+    `${base} en 4K`,
+  ]
+
+  return titles.map((title, i) => ({
+    title,
+    url: `https://www.youtube.com/results?search_query=${encodeURIComponent(clean)}`,
+    channel: ['Savoir+', 'Arte', 'Le Monde', 'Explorer'][i % 4],
+    duration: ['10:24', '52:10', '6:48', '14:02', '23:37', '41:15', '8:59', '3:12'][i],
+    views: ['1,2 M', '340 k', '86 k', '2,4 M', '512 k', '73 k', '960 k', '45 k'][i],
+    thumb: `https://images.unsplash.com/photo-1493246507139-91e8fad9978e?auto=format&fit=crop&w=900&q=80&sig=${i}`,
+    platform: ['YouTube', 'Dailymotion', 'Vimeo'][i % 3],
+  }))
+}
+
+export async function suggest(q: string): Promise<string[]> {
+  const res = await fetch(
+    `https://suggestqueries.google.com/complete/search?client=firefox&hl=fr&ie=utf-8&oe=utf-8&q=${encodeURIComponent(q)}`,
+    { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(3000) },
+  )
+  if (!res.ok) return []
+  const data = (await res.json()) as [string, string[]]
+  return Array.isArray(data[1]) ? data[1].slice(0, 8) : []
+}
+
+export type WikiSummary = {
+  title: string
+  description: string | null
+  extract: string
+  url: string
+  thumbnail: string | null
+}
+
+export async function wikiSummary(q: string): Promise<WikiSummary | null> {
+  const headers = {
+    'User-Agent': 'NexSearch/1.0 (https://nexsearch-engine.netlify.app)',
+  }
+  const search = await fetch(
+    `https://fr.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=1&srsearch=${encodeURIComponent(q)}`,
+    { headers, signal: AbortSignal.timeout(4000) },
+  )
+  if (!search.ok) return null
+  const sdata = (await search.json()) as {
+    query?: { search?: { title: string }[] }
+  }
+  const title = sdata.query?.search?.[0]?.title
+  if (!title) return null
+  const res = await fetch(
+    `https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`,
+    { headers, signal: AbortSignal.timeout(4000) },
+  )
+  if (!res.ok) return null
+  const d = (await res.json()) as {
+    type: string
+    title: string
+    description?: string
+    extract?: string
+    content_urls?: { desktop?: { page?: string } }
+    thumbnail?: { source?: string }
+  }
+  if (d.type === 'disambiguation' || !d.extract) return null
+  return {
+    title: d.title,
+    description: d.description ?? null,
+    extract: d.extract,
+    url:
+      d.content_urls?.desktop?.page ??
+      `https://fr.wikipedia.org/wiki/${encodeURIComponent(title)}`,
+    thumbnail: d.thumbnail?.source ?? null,
+  }
+}
+
+export function detectSpecialSearch(query: string): {
+  type: 'calculator' | 'translator' | 'timer'
+  expression?: string
+  language?: 'fr' | 'en'
+  durationSeconds?: number
+} | null {
+  const clean = query.trim().toLowerCase()
+  if (!clean) return null
+
+  const timerMatch = clean.match(
+    /(minuteur|timer|chronomètre|countdown|compte à rebours|compte-a-rebours)/,
+  )
+  const durationDigits = clean.match(/(\d+)\s*(second|seconde|sec|minute|min|heure|h)/)
+  if (timerMatch || durationDigits) {
+    const match = durationDigits?.[0] ?? '1 minute'
+    const units = /minute|min/.test(match) ? 'minute' : /heure|h/.test(match) ? 'heure' : 'seconde'
+    const val = Number(clean.match(/(\d+)/)?.[1] ?? '1')
+    const seconds =
+      units === 'minute' ? val * 60 : units === 'heure' ? val * 60 * 60 : val
+    return { type: 'timer', durationSeconds: Math.max(1, seconds) }
+  }
+
+  const translateMatch = /(traduit|traduire|translate|translator|english|anglais|français|francais)/.test(clean)
+  if (translateMatch) {
+    return { type: 'translator', language: 'fr' }
+  }
+
+  const calcMatch =
+    /(calculatrice|calculator|calc|scientifique|sin\(|cos\(|tan\(|sqrt\(|\bpi\b|\bmod\b|\^|\//.test(clean) ||
+    /^[\d\s\+\-\*\/\(\)\.%\.]+$/.test(clean.replace(/,/g, '.'))
+
+  if (calcMatch && clean.length > 1) {
+    return {
+      type: 'calculator',
+      expression: clean.replace(/x/g, '*').replace(/÷/g, '/').replace(/,/g, '.'),
+    }
+  }
+
+  return null
+}
+
+export function buildSpecialSearchUrl(query: string): string {
+  const special = detectSpecialSearch(query)
+  if (!special) return `/search?q=${encodeURIComponent(query)}&tab=web`
+  return `/search?q=${encodeURIComponent(query)}&tab=web`
+}
