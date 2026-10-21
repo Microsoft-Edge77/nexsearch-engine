@@ -8,41 +8,96 @@ import {
   X,
 } from 'lucide-react'
 
-import { getImageResults, type ImageResult } from '@/lib/fixtures'
 import { imgCdn } from '@/lib/nex-store'
 import { cn } from '@/lib/utils'
 
+type LiveImageResult = {
+  id: string
+  src: string
+  title: string
+  site: string
+  pageUrl: string
+  width: number
+  height: number
+  engine: string
+}
+
 export function ImageResults({ q }: { q: string }) {
-  const images = useMemo(() => getImageResults(q), [q])
+  const [images, setImages] = useState<LiveImageResult[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&type=images`)
+        if (!res.ok) throw new Error('images failed')
+        const data = await res.json()
+        const mapped = ((data.images ?? []) as any[]).map((img: any, i: number) => ({
+          id: `img${i}`,
+          src: img.full ?? img.thumb,
+          title: img.title ?? `Image ${i + 1}`,
+          site: img.domain ?? 'image source',
+          pageUrl: img.page ?? img.full ?? '#',
+          width: img.width ?? 1400,
+          height: img.height ?? 900,
+          engine: 'Bing',
+        }))
+        if (!cancelled) setImages(mapped)
+      } catch {
+        if (!cancelled) {
+          setImages([])
+          setError('Impossible de charger les images.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [q])
 
   return (
     <>
-      <div className="columns-2 gap-1.5 sm:columns-3 lg:columns-4 xl:columns-5">
-        {images.map((img, i) => (
-          <button
-            key={img.id}
-            type="button"
-            onClick={() => setOpen(i)}
-            className="nx-tile nx-turnstile group mb-1.5 block w-full break-inside-avoid"
-            style={{ '--nx-delay': `${i * 35}ms` } as React.CSSProperties}
-            aria-label={`Ouvrir ${img.title}`}
-          >
-            <img
-              src={imgCdn(img.src, 480)}
-              alt={img.title}
-              loading="lazy"
-              className="block w-full bg-white/5 object-cover"
-              style={{ aspectRatio: i % 4 === 1 ? '3 / 4' : `${img.width} / ${img.height}` }}
-            />
-            <span className="absolute inset-x-0 bottom-0 translate-y-full bg-black/75 px-2 py-1.5 text-left text-xs transition-transform group-hover:translate-y-0 group-focus-visible:translate-y-0">
-              <span className="block truncate">{img.title}</span>
-              <span className="text-muted-foreground">{img.site}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-      {open !== null && (
+      {loading && <div className="py-6 text-sm text-muted-foreground">Chargement des images…</div>}
+      {!loading && error && <div className="py-6 text-sm text-red-400">{error}</div>}
+      {!loading && !error && images.length === 0 && (
+        <div className="py-6 text-sm text-muted-foreground">Aucune image trouvée pour cette recherche.</div>
+      )}
+      {!loading && !error && (
+        <div className="columns-2 gap-1.5 sm:columns-3 lg:columns-4 xl:columns-5">
+          {images.map((img, i) => (
+            <button
+              key={img.id}
+              type="button"
+              onClick={() => setOpen(i)}
+              className="nx-tile nx-turnstile group mb-1.5 block w-full break-inside-avoid"
+              style={{ '--nx-delay': `${i * 35}ms` } as React.CSSProperties}
+              aria-label={`Ouvrir ${img.title}`}
+            >
+              <img
+                src={imgCdn(img.src, 480)}
+                alt={img.title}
+                loading="lazy"
+                className="block w-full bg-white/5 object-cover"
+                style={{ aspectRatio: i % 4 === 1 ? '3 / 4' : `${img.width} / ${img.height}` }}
+              />
+              <span className="absolute inset-x-0 bottom-0 translate-y-full bg-black/75 px-2 py-1.5 text-left text-xs transition-transform group-hover:translate-y-0 group-focus-visible:translate-y-0">
+                <span className="block truncate">{img.title}</span>
+                <span className="text-muted-foreground">{img.site}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {open !== null && images[open] && (
         <ImageViewer images={images} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
       )}
     </>
@@ -55,7 +110,7 @@ function ImageViewer({
   onIndex,
   onClose,
 }: {
-  images: ImageResult[]
+  images: LiveImageResult[]
   index: number
   onIndex: (i: number) => void
   onClose: () => void
