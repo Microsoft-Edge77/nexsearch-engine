@@ -1,15 +1,26 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink } from 'lucide-react'
 
 import { useLiveToggle } from '@/components/nex/live-tile'
 import { Calculator } from '@/components/tools/calculator'
 import { Timer } from '@/components/tools/timer'
 import { Translator } from '@/components/tools/translator'
-import { getAiOverview, getWebResults, type WebResult } from '@/lib/fixtures'
 import { detectTool, parseDuration } from '@/lib/instant-answers'
 import { useNex } from '@/lib/nex-store'
 import { AiOverview } from './ai-overview'
 import { WikiPanel } from './wiki-panel'
+
+type LiveWebResult = {
+  title: string
+  url: string
+  displayUrl: string
+  domain: string
+  snippet: string
+  engines: string[]
+  score: number
+  color: string
+  tile?: boolean
+}
 
 function host(url: string) {
   return new URL(url).hostname.replace(/^www\./, '')
@@ -34,7 +45,7 @@ function Favicon({ url, color }: { url: string; color: string }) {
   )
 }
 
-function EngineBadges({ r }: { r: WebResult }) {
+function EngineBadges({ r }: { r: LiveWebResult }) {
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[0.7rem]">
       {r.engines.map((e) => (
@@ -50,7 +61,7 @@ function EngineBadges({ r }: { r: WebResult }) {
   )
 }
 
-function ResultRow({ r, delay }: { r: WebResult; delay: number }) {
+function ResultRow({ r, delay }: { r: LiveWebResult; delay: number }) {
   return (
     <article className="nx-slide-in py-4" style={{ '--nx-delay': `${delay}ms` } as React.CSSProperties}>
       <div className="mb-1 flex items-center gap-2.5">
@@ -74,10 +85,10 @@ function ResultRow({ r, delay }: { r: WebResult; delay: number }) {
   )
 }
 
-/** A result shown as a live tile that periodically flips to preview the site */
-function ResultTile({ r, delay }: { r: WebResult; delay: number }) {
+function ResultTile({ r, delay }: { r: LiveWebResult; delay: number }) {
   const flipped = useLiveToggle(true, 4500)
   const [shotFailed, setShotFailed] = useState(false)
+
   return (
     <div className="nx-turnstile py-3" style={{ '--nx-delay': `${delay}ms` } as React.CSSProperties}>
       <a
@@ -123,9 +134,65 @@ function ResultTile({ r, delay }: { r: WebResult; delay: number }) {
 
 export function WebResults({ q }: { q: string }) {
   const { settings, hydrated } = useNex()
-  const results = useMemo(() => getWebResults(q), [q])
-  const overview = useMemo(() => getAiOverview(q, results), [q, results])
+  const [results, setResults] = useState<LiveWebResult[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const tool = detectTool(q)
+
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&type=web`)
+        if (!res.ok) throw new Error('search failed')
+        const data = await res.json()
+
+        const mapped = ((data.results ?? []) as any[]).map((r: any, i: number) => ({
+          title: r.title,
+          url: r.url,
+          displayUrl: r.displayUrl ?? r.domain ?? host(r.url),
+          domain: r.domain ?? host(r.url),
+          snippet: r.snippet ?? '',
+          engines: r.engines && r.engines.length ? r.engines : [data.source === 'duckduckgo' ? 'DuckDuckGo' : data.source === 'wikipedia' ? 'Wikipedia' : 'Bing'],
+          score: typeof r.score === 'number' ? r.score : 95 - i,
+          color: i % 4 === 2 ? '#2d89ef' : '#161616',
+          tile: i % 4 === 2,
+        }))
+
+        if (!cancelled) setResults(mapped)
+      } catch {
+        if (!cancelled) {
+          setResults([])
+          setError('Impossible de charger les résultats web.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [q])
+
+  const overview = useMemo(() => {
+    const sources = results.slice(0, 4).map((r) => ({ title: r.title, url: r.url }))
+    return {
+      paragraphs: [
+        `D’après les sources les mieux classées pour « ${q} », les résultats affichés proviennent directement des moteurs de recherche et des sources web disponibles.`,
+      ],
+      bullets: [
+        `Le classement est calculé à partir des termes de la requête « ${q} ».`,
+        'Les liens sont dédupliqués et triés par pertinence.',
+        'Le panneau de contexte Wikipédia reste affiché quand la requête correspond à une page utile.',
+      ],
+      sources,
+    }
+  }, [q, results])
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,44rem)_minmax(18rem,24rem)] lg:gap-x-12">
@@ -143,13 +210,12 @@ export function WebResults({ q }: { q: string }) {
       </aside>
 
       <div className="divide-y divide-white/10 lg:col-start-1">
-        {results.map((r, i) =>
-          r.tile ? (
-            <ResultTile key={r.id} r={r} delay={i * 50} />
-          ) : (
-            <ResultRow key={r.id} r={r} delay={i * 50} />
-          ),
+        {loading && <div className="py-6 text-sm text-muted-foreground">Chargement des résultats…</div>}
+        {!loading && error && <div className="py-6 text-sm text-red-400">{error}</div>}
+        {!loading && !error && results.length === 0 && (
+          <div className="py-6 text-sm text-muted-foreground">Aucun résultat trouvé pour cette recherche.</div>
         )}
+        {!loading && !error && results.map((r, i) => (r.tile ? <ResultTile key={`${r.url}-${i}`} r={r} delay={i * 50} /> : <ResultRow key={`${r.url}-${i}`} r={r} delay={i * 50} />))}
       </div>
     </div>
   )
